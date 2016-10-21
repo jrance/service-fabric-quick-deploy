@@ -8,7 +8,7 @@ EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{E60E14E7-1A41-4221-BF9A-4E93DD67BE80}"
 	ProjectSection(SolutionItems) = preProject
 		README.md = README.md
-		..\service-fabric-quick-debug\ServiceFabricQuickDebug\ServiceFabricQuickDebug.Vsix\bin\Release\ServiceFabricQuickDebug.vsix = ..\service-fabric-quick-debug\ServiceFabricQuickDebug\ServiceFabricQuickDebug.Vsix\bin\Release\ServiceFabricQuickDebug.vsix
+		ServiceFabricQuickDeploy\ServiceFabricQuickDebug.vsix = ServiceFabricQuickDeploy\ServiceFabricQuickDebug.vsix
 	EndProjectSection
 EndProject
 Global
