@@ -6,42 +6,43 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Threading.Tasks.Schedulers;
+using ServiceFabricQuickDebug;
 using ServiceFabricQuickDeploy.Logging;
 using ServiceFabricQuickDeploy.Models;
+using ServiceFabricQuickDeploy.ServiceManagers;
 
 namespace ServiceFabricQuickDeploy.Services
 {
     internal class QuickDeploy : IQuickDeploy
     {
         private readonly IVsEnvironment _vsEnvironment;
+        private readonly IServiceManager _serviceManager;
+        private readonly IProcessService _processService;
         private readonly ILogger _logger;
 
-        internal QuickDeploy(IVsEnvironment vsEnvironment, ILogger logger)
+        internal QuickDeploy(IVsEnvironment vsEnvironment, IServiceManager serviceManager, IProcessService processService, ILogger logger)
         {
             _vsEnvironment = vsEnvironment;
+            _serviceManager = serviceManager;
+            _processService = processService;
             _logger = logger;
         }
 
         public async Task DeployAsync(ServiceFabricApp appDetails, bool attachDebugger)
         {
-            var taskList = new List<Task<string>>();
-            foreach (var service in appDetails.ServiceFabricProjects)
+            Parallel.ForEach(appDetails.ServiceFabricProjects, service =>
             {
-                taskList.Add(Task.Run(() => DeployService(service, appDetails.ServiceFabricRelativeAppPath)));
-            }
-
-            await Task.WhenAll(taskList);
-
-            var deployedProgramFiles = taskList.Select(t => t.Result).Where(t => t != null);
-
-            if (attachDebugger)
-            {
-                await AttachToProcesses(deployedProgramFiles);
-            }
+                DeployServiceAsync(service, appDetails.ServiceFabricRelativeAppPath, attachDebugger).Wait();
+            });
         }
 
-        private string DeployService(ServiceFabricProject service, string serviceFabricRelativeAppPath)
+        private ICollection<string> GetProgramFilesThatNeedUpdating(ServiceFabricProject service,
+            string serviceFabricRelativeAppPath)
         {
+            var result = new List<string>();
+
+            var newProgramFile = new FileInfo($"{service.BuildOutputPath}\\{service.ProgramName}");
+            if (!newProgramFile.Exists) return null;
             var nodeDirectories = Directory.GetDirectories(Constants.ServiceFabricAppPath, "_Node_*",
                 SearchOption.TopDirectoryOnly);
 
@@ -53,62 +54,86 @@ namespace ServiceFabricQuickDeploy.Services
 
                 var filePath = $"{appDirectory.Last()}\\{service.ServiceFabricRelativeServicePath}\\{service.ProgramName}";
                 var existingProgramFile = new FileInfo(filePath);
-                if (existingProgramFile.Exists)
+                if (existingProgramFile.Exists && newProgramFile.LastWriteTimeUtc > existingProgramFile.LastWriteTimeUtc)
                 {
-                    var newProgramFile = new FileInfo($"{service.BuildOutputPath}\\{service.ProgramName}");
-                    if (newProgramFile.Exists && newProgramFile.LastAccessTimeUtc > existingProgramFile.LastWriteTimeUtc)
-                    {
-                        KillProcesses(existingProgramFile.Name);
-
-                        _logger.LogInformation($"Deploying build files for {service.ServiceName} to local Service Fabric cluster");
-                        CopyFiles(newProgramFile.Directory, existingProgramFile.DirectoryName);
-                    }
-                    return existingProgramFile.FullName;
+                    result.Add(existingProgramFile.DirectoryName);
                 }
             }
-            return null;
+            return result;
         }
 
-        private void KillProcesses(string processName)
+        private async Task DeployServiceAsync(ServiceFabricProject service, string serviceFabricRelativeAppPath,
+            bool attachDebugger)
         {
-            var processes = Process.GetProcessesByName(processName.Replace(".exe", string.Empty));
-
-            foreach (var process in processes)
+            ICollection<string> runningProcesses = _processService.GetRunningProcesses(service.ProgramName);
+            var deploymentLocations = GetProgramFilesThatNeedUpdating(service, serviceFabricRelativeAppPath);
+            if (deploymentLocations.Any())
             {
-                _logger.LogInformation($"Killing process {process.MainModule.FileName}");
-                process.Kill();
+                _logger.LogInformation($"Stopping service {service.ServiceName} on local Service Fabric cluster");
+                var serviceDescription = await _serviceManager.StopService(service);
+
+                _logger.LogInformation(
+                    $"Deploying build files for {service.ServiceName} to local Service Fabric cluster");
+
+                foreach (var deploymentLocation in deploymentLocations)
+                {
+                    CopyFiles(service.BuildOutputPath, deploymentLocation);
+                }
+
+                _logger.LogInformation($"Starting service {service.ServiceName} on local Service Fabric cluster");
+                runningProcesses = await _serviceManager.StartService(service, serviceDescription, runningProcesses.Count);
+            }
+            else
+            {
+            }
+
+            if (attachDebugger)
+            {
+                await AttachToProcesses(runningProcesses);
             }
         }
 
-        private async Task AttachToProcesses(IEnumerable<string> processes)
+        private int GetProcessInstanceCount(string processName)
+        {
+            var processes = Process.GetProcessesByName(processName.Replace(".exe", string.Empty));
+            return processes.Length;
+        }
+
+        private async Task AttachToProcesses(ICollection<string> runningProcesses)
         {
             var sta = new StaTaskScheduler(numberOfThreads: 4);
-            var taskList = processes
-                .Select(process => Task.Factory.StartNew(() =>
-                        _vsEnvironment.AttachDebugger(process), CancellationToken.None, TaskCreationOptions.None, sta))
-                .ToList();
+            var taskList = new List<Task>();
+            foreach(var runningProcess in runningProcesses)
+            {
+                taskList.Add(Task.Factory.StartNew(() =>
+                    _vsEnvironment.AttachDebugger(runningProcess), CancellationToken.None, TaskCreationOptions.None, sta));
+            }
+            //.Select(process => Task.Factory.StartNew(() =>
+            //        _vsEnvironment.AttachDebugger(processName), CancellationToken.None, TaskCreationOptions.None, sta))
+            //.ToList();
 
             await Task.WhenAll(taskList);
         }
 
-        private void CopyFiles(DirectoryInfo sourceDirectory, string destinationPath)
+        private void CopyFiles(string sourcePath, string destinationPath)
         {
-            foreach (var sourceFile in sourceDirectory.GetFiles())
+            foreach (var sourceFile in Directory.GetFiles(sourcePath))
             {
-                var destFileInfo = new FileInfo($"{destinationPath}\\{sourceFile.Name}");
+                var sourceFileInfo = new FileInfo(sourceFile);
+                var destFileInfo = new FileInfo($"{destinationPath}\\{sourceFileInfo.Name}");
 
-                if (!destFileInfo.Exists || sourceFile.LastWriteTimeUtc > destFileInfo.LastWriteTimeUtc)
+                if (!destFileInfo.Exists || sourceFileInfo.LastWriteTimeUtc > destFileInfo.LastWriteTimeUtc)
                 {
                     while (true)
                     {
                         try
                         {
-                            File.Copy(sourceFile.FullName, destFileInfo.FullName, true);
+                            File.Copy(sourceFileInfo.FullName, destFileInfo.FullName, true);
+                            break;
                         }
                         catch (Exception)
                         {
                             Thread.Sleep(200);
-                            throw;
                         }
                     }
                 }

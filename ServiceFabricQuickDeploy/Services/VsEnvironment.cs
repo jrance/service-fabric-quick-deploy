@@ -7,6 +7,7 @@ using System.Runtime.InteropServices.ComTypes;
 using EnvDTE;
 using EnvDTE80;
 using EnvDTE90;
+using ServiceFabricQuickDeploy.Filters;
 using ServiceFabricQuickDeploy.Logging;
 using ServiceFabricQuickDeploy.Models;
 
@@ -16,11 +17,13 @@ namespace ServiceFabricQuickDeploy.Services
     {
         private readonly ILogger _logger;
         private readonly DTE2 _dte2;
+        private static readonly object Lock = new object();
 
         public VsEnvironment(ILogger logger)
         {
             _logger = logger;
             _dte2 = GetCurrent();
+            MessageFilter.Register();
         }
 
         public IEnumerable<VsProject> GetSolutionProjects()
@@ -78,8 +81,11 @@ namespace ServiceFabricQuickDeploy.Services
             string directoryPath = null;
             var relativeOutputPath =
                 project.ConfigurationManager.ActiveConfiguration.Properties.Item("OutputPath").Value;
-            var files = Directory.GetFiles($"{projectPath}\\{relativeOutputPath}\\", "*.exe",
-                SearchOption.AllDirectories);
+            var absoluteOutputPath = $"{projectPath}\\{relativeOutputPath}\\";
+
+            if (!Directory.Exists(absoluteOutputPath)) return absoluteOutputPath;
+
+            var files = Directory.GetFiles(absoluteOutputPath, "*.exe", SearchOption.AllDirectories);
 
             var mostRecentFileWriteData = DateTime.MinValue;
             foreach (var file in files)
@@ -95,17 +101,21 @@ namespace ServiceFabricQuickDeploy.Services
             }
             return directoryPath;
         }
-
+        
         private bool AttachToProcess(string processName)
         {
+            MessageFilter.Register();
             var process = GetRunningProcess(processName);
 
             if (process != null && process.IsBeingDebugged) return true;
 
             if (process != null)
             {
-                process.Attach2("Managed");
-                return true;
+                lock (Lock)
+                {
+                    process.Attach2("Managed");
+                    return true;
+                }
             }
             return false;
         }
@@ -115,18 +125,23 @@ namespace ServiceFabricQuickDeploy.Services
             var maxWaitTimeInSecs = 90;
             var start = DateTime.Now;
 
+            _logger.LogInformation($"Attaching to process {processName}");
             int i = 0;
             while (true)
             {
                 var success = AttachToProcess(processName);
-                if (success) return;
+                if (success)
+                {
+                    _logger.LogInformation($"Successfully attached to process {processName}");
+                    return;
+                }
 
                 if (DateTime.Now.Subtract(start).Seconds > maxWaitTimeInSecs)
                 {
                     throw new TimeoutException(
                         $"Failed to attach to process {processName} within {maxWaitTimeInSecs} seconds");
                 }
-                if (i%10 == 0)
+                if (i%2 == 0)
                 {
                     _logger.LogInformation($"Waiting for {processName} to start");
                 }
@@ -138,6 +153,7 @@ namespace ServiceFabricQuickDeploy.Services
         internal void DetachDebugger(string processName)
         {
             var process = GetRunningProcess(processName);
+
             if (process != null && process.IsBeingDebugged)
             {
                 _logger.LogInformation($"Detaching debugger from process {processName}");
@@ -151,11 +167,10 @@ namespace ServiceFabricQuickDeploy.Services
             for (int i = 0; i < maxTries; i++)
             {
                 var process = _dte2.Debugger.LocalProcesses.OfType<Process3>()
-                    .FirstOrDefault(p => p.Name == processName);
-                if (process != null)
-                {
-                    return process;
-                }
+                    .FirstOrDefault(p => p.Name.Equals(processName, StringComparison.OrdinalIgnoreCase));
+
+                if(process != null) return process;
+
                 System.Threading.Thread.Sleep(200);
             }
             return null;
@@ -191,10 +206,10 @@ namespace ServiceFabricQuickDeploy.Services
                 object comObject;
                 rot.GetObject(moniker[0], out comObject);
                 var dte2 = (DTE2) comObject;
-                if (dte2.Solution.FullName
-                        .IndexOf(Environment.CurrentDirectory, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    Environment.CurrentDirectory
-                    .IndexOf(dte2.Solution.FullName, StringComparison.OrdinalIgnoreCase) >= 0)
+                Console.WriteLine(dte2.Solution.FullName);
+                var solutionDir = dte2.Solution.FullName.Substring(0, dte2.Solution.FullName.LastIndexOf("\\", StringComparison.Ordinal));
+                if (Environment.CurrentDirectory.TrimEnd('\\')
+                        .IndexOf(solutionDir.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase) >= 0)
                 {
                     return dte2;
                 }
@@ -204,6 +219,7 @@ namespace ServiceFabricQuickDeploy.Services
 
         public void Dispose()
         {
+            MessageFilter.Revoke();
         }
     }
 }
