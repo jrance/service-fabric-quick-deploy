@@ -1,43 +1,39 @@
-﻿using EnvDTE;
-using ServiceFabricQuickDeploy.Models;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Xml.Linq;
+using ServiceFabricQuickDeploy.Models;
 
 namespace ServiceFabricQuickDeploy.Services
 {
-    public class ServiceFabricAppDiscovery
+    public class ServiceFabricAppDiscovery : IServiceFabricAppDiscovery
     {
-        private IVsEnvironment _vsEnvironment;
+        private readonly IVsEnvironment _vsEnvironment;
 
         public ServiceFabricAppDiscovery(IVsEnvironment vsEnvironment)
         {
             _vsEnvironment = vsEnvironment;
         }
+
         public ServiceFabricApp GetServiceFabricAppDetails()
         {
             var result = new ServiceFabricApp { ServiceFabricProjects = new List<ServiceFabricProject>() };
-            
-            foreach (Project project in _vsEnvironment.GetSolution().Projects)
-            {
-                if (string.IsNullOrEmpty(project.FullName)) continue;
-                var projectName = project.Name;
-                var projectPath = project.FullName.Substring(0, project.FileName.LastIndexOf('\\'));
-                
-                var manifest = new FileInfo(projectPath + @"\PackageRoot\ServiceManifest.xml");
 
-                if(manifest.Exists)
+            foreach (var project in _vsEnvironment.GetSolutionProjects())
+            {
+                var manifest = new FileInfo(project.ProjectFolder + @"\PackageRoot\ServiceManifest.xml");
+
+                if (manifest.Exists)
                 {
                     var serviceFabricProject = GetServiceFabricProjectFromManifest(manifest);
-                    serviceFabricProject.BuildOutputPath = GetBuildOutputPathForProject(project, serviceFabricProject.ProgramName, projectPath);
+                    serviceFabricProject.BuildOutputPath = project.BuildOutputPath;
                     result.ServiceFabricProjects.Add(serviceFabricProject);
                 }
                 else
                 {
-                    manifest = new FileInfo(projectPath + @"\ApplicationPackageRoot\ApplicationManifest.xml");
-                    if(manifest.Exists)
+                    manifest = new FileInfo(project.ProjectFolder + @"\ApplicationPackageRoot\ApplicationManifest.xml");
+                    if (manifest.Exists)
                     {
                         result.AppTypeName = GetAppNameFromManifest(manifest);
                     }
@@ -46,31 +42,15 @@ namespace ServiceFabricQuickDeploy.Services
             return result;
         }
 
-        private string GetBuildOutputPathForProject(Project project, string programName, string projectPath)
-        {
-            string directoryPath = null;
-            var relativeOutputPath = project.ConfigurationManager.ActiveConfiguration.Properties.Item("OutputPath").Value;
-            var files = Directory.GetFiles(projectPath + relativeOutputPath, programName, SearchOption.AllDirectories);
-
-            var mostRecentFileWriteDate = DateTime.MinValue;
-            foreach(var file in files)
-            {
-                var fileInfo = new FileInfo(file);
-                if(fileInfo.LastWriteTime > mostRecentFileWriteDate || 
-                    (fileInfo.LastWriteTime == mostRecentFileWriteDate && fileInfo.DirectoryName.Length > directoryPath.Length))
-                {
-                    directoryPath = fileInfo.DirectoryName;
-                    mostRecentFileWriteDate = fileInfo.LastWriteTime;
-                }
-            }
-            return directoryPath;
-        }
-
-        private ServiceFabricProject GetServiceFabricProjectFromManifest(FileInfo manifest)
+        private ServiceFabricProject GetServiceFabricProjectFromManifest(FileSystemInfo manifest)
         {
             var ns = XNamespace.Get("http://schemas.microsoft.com/2011/01/fabric");
             var result = new ServiceFabricProject();
             var doc = XDocument.Load(manifest.FullName);
+
+            if(doc == null)
+                throw new InvalidOperationException($"Unable to read {manifest.FullName} file");
+
             result.ServiceName = doc.Root.Attribute("Name").Value;
 
             var codeElement = doc.Root.Element(ns + "CodePackage");
@@ -83,6 +63,10 @@ namespace ServiceFabricQuickDeploy.Services
         private string GetAppNameFromManifest(FileInfo manifest)
         {
             var doc = XDocument.Load(manifest.FullName);
+
+            if (doc == null)
+                throw new InvalidOperationException($"Unable to read {manifest.FullName} file");
+
             return doc.Root.Attribute("ApplicationTypeName").Value;
         }
     }

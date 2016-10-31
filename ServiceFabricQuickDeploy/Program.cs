@@ -1,43 +1,42 @@
-﻿using EnvDTE90;
-using ServiceFabricQuickDeploy.Services;
-using System;
-using System.Collections.Generic;
+﻿using System;
 using System.Diagnostics;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using System.Threading;
+using CommandLine;
+using ServiceFabricQuickDeploy.Logging;
+using ServiceFabricQuickDeploy.Models;
+using ServiceFabricQuickDeploy.Services;
 
 namespace ServiceFabricQuickDeploy
 {
     class Program
     {
-        [STAThread]
         static void Main(string[] args)
         {
-            var attach = true;
-            var output = attach ?
-                $"Begin deploy and attach for Service Fabric services" :
-                $"Begin deploy of Service Fabric services";
+            ILogger logger = new ConsoleLogger();
 
-            Console.WriteLine(output);
+            try
+            {
+                var options = new Options();
+                if (Parser.Default.ParseArguments(args, options))
+                {
+                    Thread.Sleep(10*100);
+                    var stopwatch = Stopwatch.StartNew();
 
-            var stopwatch = Stopwatch.StartNew();
-            
-            //System.Threading.Thread.Sleep(1000 * 10);
-
-            var vsEnvironment = new VsEnvironment();
-            var quickDeploy = new QuickDeploy(vsEnvironment);
-            var serviceFabricServiceDiscovery = new ServiceFabricAppDiscovery(vsEnvironment);
-            var appDetails = serviceFabricServiceDiscovery.GetServiceFabricAppDetails();
-            quickDeploy.Deploy(appDetails, true);
-
-            var elapsedSeconds = Math.Round((double)stopwatch.ElapsedMilliseconds / 1000, 2);
-
-            output = attach ? 
-                $"Deploy and attach completed in {elapsedSeconds} seconds" : 
-                $"Deploy completed in {elapsedSeconds} seconds";
-
-            Console.WriteLine(output);
+                    logger.LogInformation($"Begin deploy {(options.AttachDebugger ? "and attach" : "")} of Service Fabric services");
+                    using (var vsEnvironment = new VsEnvironment(logger))
+                    {
+                        IServiceFabricAppDiscovery appDiscovery = new ServiceFabricAppDiscovery(vsEnvironment);
+                        IQuickDeploy quickDeploy = new QuickDeploy(vsEnvironment, logger);
+                        quickDeploy.DeployAsync(appDiscovery.GetServiceFabricAppDetails(), options.AttachDebugger).GetAwaiter().GetResult();
+                    }
+                    var elapsedSecs = Math.Round((double)stopwatch.ElapsedMilliseconds / 1000, 2);
+                    logger.LogInformation($"Deploy {(options.AttachDebugger ? "and attach" : "")} completed in {elapsedSecs} seconds");
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError("Error occurred during quick debug", ex);
+            }
         }
     }
 }
