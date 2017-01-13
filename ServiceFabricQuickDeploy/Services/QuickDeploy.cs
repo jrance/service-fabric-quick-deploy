@@ -6,7 +6,6 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Threading.Tasks.Schedulers;
-using ServiceFabricQuickDebug;
 using ServiceFabricQuickDeploy.Logging;
 using ServiceFabricQuickDeploy.Models;
 using ServiceFabricQuickDeploy.ServiceManagers;
@@ -28,23 +27,23 @@ namespace ServiceFabricQuickDeploy.Services
             _logger = logger;
         }
 
-        public async Task DeployAsync(ServiceFabricApp appDetails, bool attachDebugger)
+        public async Task DeployAsync(ServiceFabricApp appDetails, string serviceFabricAppPath, bool attachDebugger)
         {
+            var nodeDirectories = Directory.GetDirectories(serviceFabricAppPath, "_Node_*",
+                SearchOption.TopDirectoryOnly);
             Parallel.ForEach(appDetails.ServiceFabricProjects, service =>
             {
-                DeployServiceAsync(service, appDetails.ServiceFabricRelativeAppPath, attachDebugger).Wait();
+                DeployServiceAsync(service, appDetails.ServiceFabricRelativeAppPath, nodeDirectories, attachDebugger).Wait();
             });
         }
 
-        private ICollection<string> GetProgramFilesThatNeedUpdating(ServiceFabricProject service,
+        private ICollection<string> GetProgramFilesThatNeedUpdating(ServiceFabricProject service, string[] nodeDirectories,
             string serviceFabricRelativeAppPath)
         {
             var result = new List<string>();
 
             var newProgramFile = new FileInfo($"{service.BuildOutputPath}\\{service.ProgramName}");
             if (!newProgramFile.Exists) return null;
-            var nodeDirectories = Directory.GetDirectories(Constants.ServiceFabricAppPath, "_Node_*",
-                SearchOption.TopDirectoryOnly);
 
             foreach (var directory in nodeDirectories)
             {
@@ -62,11 +61,11 @@ namespace ServiceFabricQuickDeploy.Services
             return result;
         }
 
-        private async Task DeployServiceAsync(ServiceFabricProject service, string serviceFabricRelativeAppPath,
+        private async Task DeployServiceAsync(ServiceFabricProject service, string serviceFabricRelativeAppPath, string[] nodeDirectories,
             bool attachDebugger)
         {
             ICollection<string> runningProcesses = _processService.GetRunningProcesses(service.ProgramName);
-            var deploymentLocations = GetProgramFilesThatNeedUpdating(service, serviceFabricRelativeAppPath);
+            var deploymentLocations = GetProgramFilesThatNeedUpdating(service, nodeDirectories, serviceFabricRelativeAppPath);
             if (deploymentLocations.Any())
             {
                 _logger.LogInformation($"Stopping service {service.ServiceName} on local Service Fabric cluster");

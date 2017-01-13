@@ -1,7 +1,7 @@
-namespace ServiceFabricQuickDebug
+namespace ServiceFabricQuickDeploy
 {
     internal static class Constants
     {
-        internal static string ServiceFabricAppPath = "C:\\SfDevCluster\\Data\\_App\\";
+        internal const string DefaultServiceFabricAppPath = "C:\\SfDevCluster\\Data\\_App\\";
     }
 }

@@ -5,6 +5,6 @@ namespace ServiceFabricQuickDeploy.Services
 {
     internal interface IQuickDeploy
     {
-        Task DeployAsync(ServiceFabricApp appDetails, bool attachDebugger);
+        Task DeployAsync(ServiceFabricApp appDetails, string serviceFabricAppPath, bool attachDebugger);
     }
 }

@@ -34,7 +34,7 @@ namespace ServiceFabricQuickDeploy
                         IQuickDeploy quickDeploy = new QuickDeploy(vsEnvironment, serviceManager, processService, logger);
 
                         var appDetails = appDiscovery.GetServiceFabricAppDetails();
-                        quickDeploy.DeployAsync(appDetails, options.AttachDebugger).GetAwaiter().GetResult();
+                        quickDeploy.DeployAsync(appDetails, options.ServiceFabricAppPath, options.AttachDebugger).GetAwaiter().GetResult();
                     }
                     var elapsedSecs = Math.Round((double) stopwatch.ElapsedMilliseconds/1000, 2);
                     logger.LogInformation(
