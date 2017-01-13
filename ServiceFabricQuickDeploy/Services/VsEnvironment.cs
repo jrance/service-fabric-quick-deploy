@@ -113,9 +113,12 @@ namespace ServiceFabricQuickDeploy.Services
             {
                 lock (Lock)
                 {
-                    process.Attach2("Managed");
-                    return true;
+                    if (!process.IsBeingDebugged)
+                    {
+                        process.Attach();
+                    }
                 }
+                return true;
             }
             return false;
         }
