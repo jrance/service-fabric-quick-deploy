@@ -31,10 +31,11 @@ namespace ServiceFabricQuickDeploy.Services
         {
             var nodeDirectories = Directory.GetDirectories(serviceFabricAppPath, "_Node_*",
                 SearchOption.TopDirectoryOnly);
-            Parallel.ForEach(appDetails.ServiceFabricProjects, service =>
-            {
-                DeployServiceAsync(service, appDetails.ServiceFabricRelativeAppPath, nodeDirectories, attachDebugger).Wait();
-            });
+
+            var tasks =
+                appDetails.ServiceFabricProjects.Select(
+                    s => DeployServiceAsync(s, appDetails.ServiceFabricRelativeAppPath, nodeDirectories, attachDebugger));
+            await Task.WhenAll(tasks);
         }
 
         private ICollection<string> GetProgramFilesThatNeedUpdating(ServiceFabricProject service, string[] nodeDirectories,

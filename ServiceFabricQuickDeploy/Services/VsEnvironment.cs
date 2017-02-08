@@ -101,7 +101,7 @@ namespace ServiceFabricQuickDeploy.Services
             }
             return directoryPath;
         }
-        
+
         private bool AttachToProcess(string processName)
         {
             MessageFilter.Register();
@@ -115,7 +115,19 @@ namespace ServiceFabricQuickDeploy.Services
                 {
                     if (!process.IsBeingDebugged)
                     {
-                        process.Attach();
+                        var retryCount = 0;
+                        try
+                        {
+                            process.Attach();
+                        }
+                        catch (Exception)
+                        {
+                            retryCount++;
+                            if (retryCount > 5)
+                            {
+                                throw;
+                            }
+                        }
                     }
                 }
                 return true;
