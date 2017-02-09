@@ -123,10 +123,11 @@ namespace ServiceFabricQuickDeploy.Services
                         catch (Exception)
                         {
                             retryCount++;
-                            if (retryCount > 5)
+                            if (retryCount > 15)
                             {
                                 throw;
                             }
+                            System.Threading.Thread.Sleep(200);
                         }
                     }
                 }
